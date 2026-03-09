@@ -3,7 +3,7 @@
 #
 #    Author: Jay Deiman
 #    Email: admin@splitstreams.com
-# 
+#
 #    This file is part of pylibgal3.
 #
 #    pylibgal3 is free software: you can redistribute it and/or modify
@@ -23,27 +23,27 @@
 
 from distutils.core import setup
 
-setup(name='pylibgal3' ,
-    version='0.1.5' ,
-    author='Jay Deiman' ,
-    author_email='admin@splitstreams.com' ,
-    url='http://stuffivelearned.org' ,
-    description='A library for accessing/manipulating a Gallery 3 install' ,
-    packages=['libg3'] ,
-    package_dir={'libg3': 'libg3'} ,
+setup(name='pylibgal3',
+    version='0.1.5',
+    author='Jay Deiman',
+    author_email='admin@splitstreams.com',
+    url='http://stuffivelearned.org',
+    description='A library for accessing/manipulating a Gallery 3 install',
+    packages=['libg3'],
+    package_dir={'libg3': 'libg3'},
     classifiers=[
-        'Development Status :: 4 - Beta' ,
-        'Intended Audience :: System Administrators' ,
-        'Intended Audience :: Information Technology' ,
-        'License :: OSI Approved :: GNU General Public License (GPL)' ,
-        'Natural Language :: English' ,
-        'Operating System :: POSIX' ,
-        'Programming Language :: Python' ,
-        'Topic :: System :: Systems Administration' ,
-        'Topic :: Internet :: WWW/HTTP' ,
-        'Topic :: Software Development :: Libraries :: Python Modules' ,
-        'Topic :: Software Development :: Libraries' ,
-        'Topic :: System' ,
+        'Development Status :: 4 - Beta',
+        'Intended Audience :: System Administrators',
+        'Intended Audience :: Information Technology',
+        'License :: OSI Approved :: GNU General Public License (GPL)',
+        'Natural Language :: English',
+        'Operating System :: POSIX',
+        'Programming Language :: Python',
+        'Topic :: System :: Systems Administration',
+        'Topic :: Internet :: WWW/HTTP',
+        'Topic :: Software Development :: Libraries :: Python Modules',
+        'Topic :: Software Development :: Libraries',
+        'Topic :: System',
     ]
 
 )

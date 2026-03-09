@@ -18,14 +18,16 @@
 #    along with pylibgal3.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-__all__ = ['G3Error' , 'G3RequestError' , 'G3InvalidRespError' , 
-    'G3UnknownTypeError' , 'G3AuthError' , 'G3UnknownError']
+__all__ = ['G3Error', 'G3RequestError', 'G3InvalidRespError',
+           'G3UnknownTypeError', 'G3AuthError', 'G3UnknownError']
+
 
 class G3Error(Exception):
     pass
 
+
 class G3RequestError(G3Error):
-    def __init__(self , errDict):
+    def __init__(self, errDict):
         self.errors = errDict
         self._message = self._getMessage()
 
@@ -38,14 +40,18 @@ class G3RequestError(G3Error):
     def __str__(self):
         return self._message
 
+
 class G3InvalidRespError(G3Error):
     pass
+
 
 class G3UnknownTypeError(G3InvalidRespError):
     pass
 
+
 class G3AuthError(G3Error):
     pass
+
 
 class G3UnknownError(G3Error):
     pass
