@@ -93,7 +93,7 @@ class BaseRemote(object):
             if k == 'entity':
                 # Skip it
                 continue
-            if (type(v) in str and v.startswith('http') and 
+            if (type(v) in (str,) and v.startswith('http') and 
                     'url' not in k) or k == 'members':
                 setattr(self , '_%s' % k , v)
             else:

@@ -34,7 +34,7 @@ class BaseRequest(Request):
             if isinstance(data , dict):
                 data = 'entity=%s' % quote(json.dumps(data , 
                     separators=(',' , ':')))
-            elif type(data) not in str:
+            elif type(data) not in (str,):
                 raise TypeError('Invalid type for data.  It should be '
                     'a "dict" or "str", not %s' % type(data))
             headers['Content-Length'] = str(len(data))
