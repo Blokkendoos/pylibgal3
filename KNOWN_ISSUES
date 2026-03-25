@@ -1,12 +1,13 @@
 =========
 pylibgal3
 =========
-*   Need to implement member sorting
-*   Need to implement image resizing
-*   The getRandomImage() does not currently work
+* Need to implement member sorting
+* Need to implement image resizing
+* The getRandomImage() does not currently work
+* Optimize large album access (weakref)
 
 =========
 Gallery 3
 =========
-*   It appears that the 3.0 release of Gallery has a broken implementation
-    of the random image retrieval
+* It appears that the 3.0 release of Gallery has a broken implementation
+  of the random image retrieval

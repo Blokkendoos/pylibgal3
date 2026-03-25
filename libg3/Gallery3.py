@@ -18,24 +18,21 @@
 #    along with pylibgal3.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-__all__ = ['Gallery3', 'login']
+__all__ = ['Gallery3', 'G3Client', 'login']
 
-import urllib.error
-import urllib.parse
-import urllib.request
 from urllib.parse import quote, urlencode
-from uuid import uuid4
 
-from .Errors import G3AuthError, G3RequestError, G3UnknownError
-from .G3Items import Album, BaseRemote, RemoteImage, Tag, \
-    getItemFromResp, getItemsFromResp
-from .Requests import DeleteRequest, GetRequest, PostRequest, PutRequest
+import requests
+
+from .Errors import G3RequestError, G3UnknownError
+from .G3Items import getItemFromResp, getItemsFromResp, parseItem
+
 try:
     import json
-except:
+except ImportError:
     try:
         import simplejson
-    except ImportError as e:
+    except ImportError:
         raise ImportError('You must have either the "json" or "simplejson"'
                           'library installed!')
 
@@ -43,44 +40,50 @@ except:
 class Gallery3(object):
     """Main utility class that should be instantiated and used for all calls."""
 
-    def __init__(self, host, apiKey, g3Base='/gallery3', port=80, ssl=False):
+    def __init__(self, host, apiKey, g3Base='/gallery3', port=443):
         """
-        Initialize the gallery 3 object.
+        Initialize the Gallery 3 object.
 
-        host(str)   : The hostname of the gallery site
-        apiKey(str) : The api key to use for the connections
-        g3Base(str) : The remote url path to your gallery 3 install
-                      (default: /gallery3)
-        port(int)   : The port number to connect to (default: 80)
-        ssl(bool)   : If true, use SSL for the connection (default: 80)
+        @param host: The hostname of the gallery site
+        @param apiKey: The api key to use for the connections
+        @param g3Base: The remote url path to your gallery 3 install
         """
-        self.host = host
-        self.apiKey = apiKey
-        self.port = int(port)
-        self.ssl = ssl
-        self.g3Base = g3Base.strip('/')
-        self.protocol = ('http', 'https')[ssl]
+        protocol = 'https'
+        self.base_url = f"{protocol}://{host}:{port}/{g3Base.strip('/')}"
+        self.client = G3Client(self.base_url, apiKey)
         self.root = None
-        self._rootUri = 'index.php/rest/item/1'
-        self._opener = None
-        self._buildOpener()
+
+    def _url(self, resource, params=None):
+        url = f"{self.base_url}/{quote(resource)}"
+        if params:
+            url += f"?{urlencode(params)}"
+        return url
+
+    def get(self, url):
+        return self.client.request('GET', url)
+
+    def post(self, url, data=None, headers=None):
+        return self.client.request('POST', url, data=data, headers=headers)
+
+    def put(self, url, data=None):
+        return self.client.request('PUT', url, data=data)
+
+    def delete(self, url):
+        return self.client.request('DELETE', url)
 
     def getRoot(self):
-        """Return the root item (album)."""
-        if self.root is None:
-            resp = self.getRespFromUri(self._rootUri)
-            self.root = getItemFromResp(resp, self)
+        if not self.root:
+            resp = self.get(self._url('index.php/rest/item/1'))
+            self.root = parseItem(resp.json(), self)
         return self.root
 
     def getRandomImage(self, album, direct=True):
         """
-        Return a random RemoteImage object for the album.
+        Get a random image for the album.
 
-        album(Album)        : The album object to pull the random image from
-        direct(bool)        : If set to False, the image may be pulled from
-                              a sub-album
-
-        returns(RemoteImage) : a RemoteImage instance
+        @param album: The album object to pull the random image from
+        @param direct: If set to False, the image may be pulled from a sub-album
+        @return: a RemoteImage instance
         """
         scope = ('all', 'direct')[direct]
         data = {
@@ -92,14 +95,31 @@ class Gallery3(object):
         resp = self.getRespFromUrl(url)
         return getItemFromResp(resp, self)
 
+    def getRespFromUrl(self, url):
+        """
+        Get the response object given a full URL.
+
+        @param url: the url to the resource (on the server)
+        @return: object identified by the url
+        """
+        return self.get(url)
+
+    def getRespFromUri(self, uri, kwargs={}):
+        """
+        Get the response object with the given URI.
+
+        @param uri: The uri string defining the resource on the defined host
+        @return: The 'addinfourl' response object
+        """
+        url = self._url(uri, kwargs)
+        return self.getRespFromUrl(url)
+
     def getItemsForUrls(self, urls, parent=None):
         """
-        Retrieve an item for each url specified in the urls list.
+        Get an item for each specified URL.
 
-        urls(list[str])     : The list of urls to retrieve
-
-        returns(list[BaseRemote])   : a list of the corresponding
-                                      remote objects
+        @param urls: list of urls to retrieve
+        @return: a list of the corresponding remote objects
         """
         numUrls = len(urls)
         start = 0
@@ -112,362 +132,81 @@ class Gallery3(object):
                 'start': str(start),
             }
             resp = self.getRespFromUri('index.php/rest/items', data)
-            ret.extend(getItemsFromResp(resp, self, parent))
+            # ret.extend(getItemsFromResp(resp, self, parent))
+            items = getItemsFromResp(resp, self, parent)
+            # FIXME work-around for empty items list
+            if items is not None:
+                ret.extend(items)
             start += increment
         return ret
 
-    def getRespFromUrl(self, url):
-        """
-        Get the response object given a full url.
 
-        url(str) : The url to the resource. A full url rather than an
-                   uri defining the location on the server
+class G3Client:
 
-        returns : the response object
-        """
-        req = GetRequest(url, self.apiKey)
-        resp = self._openReq(req)
-        return resp
+    def __init__(self, base_url, api_key=None):
+        self.session = requests.Session()
+        self.base_url = base_url.rstrip('/')
+        self.api_key = api_key
 
-    def getRespFromUri(self, uri, kwargs={}):
-        """
-        Perform the request for the given uri.
-
-        uri(str) : The uri string defining the resource on the defined host
-
-        returns  : the "addinfourl" response
-        """
-        url = self._buildUrl(uri, kwargs)
-        return self.getRespFromUrl(url)
-
-    def addAlbum(self, parent, albumName, title, description=''):
-        """
-        Add an album to the given parent album.
-
-        parent(Album)       : The parent Album object
-        albumName(str)      : The name of the album
-        title(str)          : The album title
-        description(str)    : The album description
-
-        returns(Album)      : The Album object that was created
-        """
-        if not parent.can_edit:
-            raise G3AuthError('You do not have permission to edit: %s' %
-                              parent.title)
-        data = {
-            'type': 'album',
-            'name': albumName,
-            'title': title,
-            'description': description,
+    def _headers(self, method):
+        headers = {
+            'X-Gallery-Request-Method': method.lower(),
         }
-        req = PostRequest(parent.url, self.apiKey, data)
-        resp = self._openReq(req)
-        newObjUrl = self._getUrlFromResp(resp)
-        item = getItemFromResp(self.getRespFromUrl(newObjUrl), self, parent)
-        parent._members.append(newObjUrl)
-        parent.members.append(item)
-        return item
+        if self.api_key:
+            headers['X-Gallery-Request-Key'] = self.api_key
+        return headers
 
-    def addImage(self, parent, image, title='', description='', name=''):
-        """
-        Add a LocalImage to the parent album.
-
-        parent(Album)           : The parent album to add the image to
-        image(LocalImage)       : The local image to upload and add to the
-                                  parent
-        title(str)              : The image title
-        description(str)        : The image description
-        name(str)               : The image file name
-
-        returns(RemoteImage)    : The RemoteImage instance for the item
-                                  uploaded
-        """
-        if not parent.can_edit:
-            raise G3AuthError('You do not have permission to edit: %s' %
-                              parent.title)
-        if name:
-            image.Filename = name
-        entity = {
-            'name': image.filename,
-            'type': image.type,
-            'title': title,
-            'description': description,
-        }
-        boundary = str(uuid4())
-        headers = {'Content-Type': 'multipart/form-data; boundary=%s' %
-                   boundary}
-        # this is more complicated than adding an album.  We have to
-        # construct the upload MIME headers, including build the string
-        # data section
-        data = '--%s\r\n' % boundary
-        data += 'Content-Disposition: form-data; name="entity"\r\n'
-        data += 'Content-Type: text/plain; ' \
-            'charset=UTF-8\r\n'
-        data += 'Content-Transfer-Encoding: 8bit\r\n'
-        data += '\r\n'
-        data += '%s\r\n' % json.dumps(entity, separators=(',', ':'))
-        data += '--%s\r\n' % boundary
-        data += image.getUploadContent()
-        data += '--%s--\r\n' % boundary
-        req = PostRequest(parent.url, self.apiKey, data, headers)
-        resp = self._openReq(req)
-        newObjUrl = self._getUrlFromResp(resp)
-        item = getItemFromResp(self.getRespFromUrl(newObjUrl), self, parent)
-        parent._members.append(newObjUrl)
-        parent.members.append(item)
-        return item
-
-    def addMovie(self, parent, movie, title='', description='', name=''):
-        """
-        Add a LocalMovie to the parent album.
-
-        parent(Album)           : The parent album to add the movie to
-        image(LocalMovie)       : The local movie to upload and add to the
-                                  parent
-        title(str)              : The movie title
-        description(str)        : The movie description
-        name(str)               : The movie file name
-
-        returns(RemoteMovie)    : The RemoteMovie instance for the movie
-                                  uploaded
-        """
-        return self.addImage(parent, movie, title, description, name)
-
-    def setAlbumCover(self, album, image):
-        """
-        Update a remote item's title and description.
-
-        album(Album)                    : The album to set the cover on
-        image(RemoteImage)              : The image to use as the cover
-
-        returns(tuple(status, msg))    : a tuple of a boolean status
-                                         and a message if there is an error
-        """
-        if not album.can_edit:
-            raise G3AuthError('You do not have permission to edit: %s' %
-                              album.title)
+    def request(self, method, url,
+                data=None, headers=None, files=None):
+        # unpack dictionary
+        headers = {**self._headers(method), **(headers or {})}
         try:
-            self._isItemValid(album, Album)
-            self._isItemValid(image, RemoteImage)
-        except Exception as e:
-            return (False, str(e))
-        data = {
-            'album_cover': image.url,
-        }
-        req = PutRequest(album.url, self.apiKey, data)
-        try:
-            resp = self._openReq(req)
-        except G3RequestError as e:
-            return (False, str(e))
-        album.album_cover = image
-        album._album_cover = image.url
-        return (True, '')
+            resp = self.session.request(
+                method=method,
+                url=url,
+                headers=headers,
+                data=data,
+                files=files,
+            )
+            resp.raise_for_status()
+            return resp
+        except requests.HTTPError:
+            try:
+                err = resp.json()
+                if 'errors' in err:
+                    raise G3RequestError(err['errors'])
+            except Exception:
+                pass
+            raise G3UnknownError(f"HTTP error: {resp.status_code}")
 
-    def updateItem(self, item):
-        """
-        Update a remote item's title and description.
-
-        item(BaseRemote)        : An item descended from BaseRemote
-
-        returns(tuple(status, msg)) : a tuple of a boolean status
-                                      and a message if there is an error
-        """
-        if not item.can_edit:
-            raise G3AuthError('You do not have permission to edit: %s' %
-                              item.title)
-        try:
-            self._isItemValid(item, BaseRemote)
-        except Exception as e:
-            return (False, str(e))
-        data = {
-            'title': item.title,
-            'description': item.description,
-        }
-        req = PutRequest(item.url, self.apiKey, data)
-        try:
-            resp = self._openReq(req)
-        except G3RequestError as e:
-            return (False, str(e))
-        return (True, '')
-
-    def updateAlbum(self, album):
-        """
-        Update the title and description for an album.
-
-        image(Album)                    : Updates the title and/or description
-                                          for the Album
-
-        returns(tuple(status, msg))    : a tuple of a boolean status
-                                         and a message if there is an error
-        """
-        return self.updateItem(album)
-
-    def updateImage(self, image):
-        """
-        Update the title and description for an image.
-
-        image(RemoteImage)  : Updates the title and/or description for the
-                              RemoteImage
-
-        returns(tuple(status, msg))    : a tuple of a boolean status
-                                         and a message if there is an error
-        """
-        return self.updateItem(image)
-
-    def updateMovie(self, movie):
-        """
-        Update the title and description for a movie.
-
-        image(RemoteMovie)  : Updates the title and/or description for the
-                              RemoteMovie
-
-        returns(tuple(status, msg))    : a tuple of a boolean status
-                                         and a message if there is an error
-        """
-        return self.updateItem(movie)
-
-    def deleteItem(self, item):
-        """
-        Delete the given item.
-
-        item(BaseRemote)               : The item to delete
-
-        returns(tuple(status, msg))    : a tuple of a boolean status
-                                         and a message if there is an error
-        """
-        if not item.can_edit:
-            raise G3AuthError('You do not have permission to edit: %s' %
-                              item.title)
-        try:
-            self._isItemValid(item, BaseRemote)
-        except Exception as e:
-            return (False, e.message)
-        req = DeleteRequest(item.url, self.apiKey)
-        try:
-            resp = self._openReq(req)
-        except G3RequestError as e:
-            return (False, e.message)
-        return (True, '')
-
-    def tagItem(self, item, tagName):
-        """
-        Tag this item with the given string.
-
-        tagName(str)        : The actual tag name
-
-        returns(Tag)        : The tag that was created
-        """
-        # First we have to create the tag itself, if necessary
-        data = {
-            'name': str(tagName),
-        }
-        url = self._buildUrl('index.php/rest/tags')
-        req = PostRequest(url, self.apiKey, data)
-        resp = self._openReq(req)
-        r = json.loads(resp.read())
-        tagUrl = r['url']
-        # And now that we have our (possibly) newly created tag, we can
-        # use that to tag our item
-        data = {
-            'tag': tagUrl,
-            'item': item.url,
-        }
-        url = self._buildUrl('index.php/rest/item_tags/%s' % item.id)
-        req = PostRequest(url, self.apiKey, data)
-        resp = self._openReq(req)
-        respObj = json.loads(resp.read())
-        item.relationships['tags']['members'].append(respObj['url'])
-        tag = Tag(respObj, self, item)
-        if hasattr(item, 'tags'):
-            item.tags.append(tag)
-        return tag
-
-    def addComment(self, image, comment):
-        """
-        Comment on this item with the given string.
-
-        comment(str)        : The comment string
-
-        returns(Comment)    : The comment that was created
-        """
-        data = {
-            'item': image.url,
-            'text': comment,
-        }
-        url = self._buildUrl('index.php/rest/comments')
-        req = PostRequest(url, self.apiKey, data)
-        resp = self._openReq(req)
-        commUrl = json.loads(resp.read())['url']
-        resp = self.getRespFromUrl(commUrl)
-        comm = getItemFromResp(resp, self, image)
-        if hasattr(image, 'comments'):
-            image.comments.append(comm)
-        return comm
-
-    def _buildOpener(self):
-        cp = urllib.request.HTTPCookieProcessor()
-        self._opener = urllib.request.build_opener(cp)
-        if self.ssl:
-            self._opener.add_handler(urllib.request.HTTPSHandler())
-
-    def _buildUrl(self, resource, kwargs={}):
-        url = '%s://%s:%d/%s/%s' % (self.protocol, self.host, self.port,
-                                    quote(self.g3Base), quote(resource))
-        if kwargs:
-            url += '?%s' % urlencode(kwargs)
-        return url
-
-    def _getUrlFromResp(self, resp):
-        d = json.loads(resp.read())
-        return d['url']
-
-    def _openReq(self, req):
-        try:
-            resp = self._opener.open(req)
-        except urllib.error.HTTPError as e:
-            err = json.loads(e.read())
-            if isinstance(err, dict) and 'errors' in err:
-                raise G3RequestError(err['errors'])
-            else:
-                raise G3UnknownError('Unknown request error: %s' % e)
-        return resp
-
-    def _isItemValid(self, item, cls):
-        if not isinstance(item, cls):
-            raise TypeError('Items to be modified must be descended from '
-                            '%s: %s' % (cls, type(item)))
-        if 'url' not in item.__dict__:
-            raise G3UnknownError('The object, %s, has no "url"' % item)
+    def delete(self, url):
+        resp = self.session.delete(url)
+        resp.raise_for_status()
+        return resp.status_code == 20
 
 
-def login(host, username, passwd, g3Base='/gallery3', port=80, ssl=False):
+def login(host, username, passwd, g3Base='/gallery3', port=443):
     """
     Log you in.
 
-    host(str)       : The hostname of the gallery site
-    username(str)   : The username to login with
-    passwd(str)     : The password to login with
-    g3Base(str)     : The remote url path to your gallery 3 install
-                      (default: /gallery3)
-    port(int)       : The port number to connect to (default: 80)
-    ssl(bool)       : If true, use SSL for the connection (default: 80)
+    @param host: The hostname of the gallery site
+    @param username: The username to login with
+    @param passwd: The password to login with
+    @param g3Base: The remote url path to your gallery 3 install
+    @param port: The port number to connect to
 
-    returns         : a Gallery3 object on success, otherwise None
+    @return: a Gallery3 object on success, otherwise None
     """
     data = {
         'user': username,
         'password': passwd,
     }
-    protocol = ('http', 'https')[ssl]
-    url = '%s://%s:%d/%s/index.php/rest' % (protocol, host, port,
-                                            quote(g3Base))
-    req = PostRequest(url, None, urlencode(data))
-    opener = urllib.request.build_opener()
-    if ssl:
-        opener.add_handler(urllib.request.HTTPSHandler())
+    url = f'https://{host}:{port}/{g3Base}/index.php/rest'
     try:
-        resp = opener.open(req)
-    except urllib.error.HTTPError as e:
+        resp = requests.post(url, data=data)
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as err:
+        print(f"Login error: {err}")
         return None
-    apiKey = resp.read().strip('\'"')
-    return Gallery3(host, apiKey, g3Base, port, ssl)
+    # apiKey = resp.text.strip('\'"')  # DEBUG
+    # print(f"apiKey: {apiKey}")  # DEBUG

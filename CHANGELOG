@@ -1,4 +1,10 @@
 -------------
+Version 0.1.7
+-------------
+
+* Possibly Large album access regression (due to removed weakref)
+
+-------------
 Version 0.1.4
 -------------
 

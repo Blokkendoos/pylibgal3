@@ -21,279 +21,78 @@
 __all__ = ['Album', 'Image', 'LocalImage', 'RemoteImage', 'LocalMovie',
            'RemoteMovie', 'getItemFromResp', 'getItemsFromResp']
 
+import datetime as dt
 import mimetypes
 import os
-import re
-import weakref
-from datetime import datetime
 
-from Errors import G3Error, G3InvalidRespError, G3UnknownTypeError
+from .Errors import G3Error, G3InvalidRespError, G3UnknownTypeError
 try:
     import json
-except:
+except ImportError:
     try:
         import simplejson
-    except ImportError as e:
+    except ImportError:
         raise ImportError('You must have either the "json" or "simplejson"'
                           'library installed!')
 
 
-class BaseRemote(object):
-    def __init__(self, respObj, weakGalObj, weakParent=None):
-        self._setAttrItems(list(respObj.items()))
-        if 'entity' in respObj:
-            self._setAttrItems(list(respObj['entity'].items()))
-        self._weakParent = None
-        if weakParent is not None:
-            self._weakParent = weakParent
-        self._weakGal = weakGalObj
-        self.fh = None
-        self._postInit()
+class BaseRemote:
 
-    def __str__(self):
-        try:
-            return self.title
-        except:
-            pass
-        return self.name
+    def __init__(self, data, gallery, parent=None):
+        """Initialize.
 
-    def __getattr__(self, name):
-        """Lazy retrieval of member objects."""
-        # Process the specials
-        if name == 'members':
-            self.members = self._getMemberObjects()
-            return self.members
-        if name == 'tags':
-            self.tags = self._getTags()
-            return self.tags
-        if name == 'comments':
-            self.comments = self._getComments()
-            return self.comments
-        # Process the weak reference calls
-        if name == '_gal':
-            return self._weakGal()
-        if name == 'parent' and self._weakParent is not None:
-            return self._weakParent()
-        # Process the generic items
-        urlAttr = '_%s' % name
-        # Call __getattribute__ to prevent loops
-        attr = object.__getattribute__(self, urlAttr)
-        if attr is not None and attr.startswith('http'):
-            obj = self._getUrlObject(attr)
-            setattr(self, name, obj)
-            return obj
-        raise AttributeError(name)
+        @param data: dict
+        @param gallery: Gallery3 object
+        @param parent: the parent object
+        """
+        self._data = data
+        self._entity = data.get('entity', {})
+        self._members = data.get('members', {})
+        self._gallery = gallery
+        self._parent = parent
+        for k, v in {**data, **self._entity}.items():
+            setattr(self, k, v)
 
-    def _postInit(self):
-        """
-        Perform any special initialization.
+    def __repr__(self):
+        return f"<{self.__class__.__name__} {getattr(self, 'title', '')}>"
 
-        This is a 'Virtual method'.
-        """
-        pass
+    @property
+    def url(self):
+        return self._url
 
-    def _setAttrItems(self, d):
-        for k, v in d:
-            if k == 'entity':
-                # Skip it
-                continue
-            if (type(v) in (str,) and v.startswith('http') and
-                    'url' not in k) or k == 'members':
-                setattr(self, '_%s' % k, v)
-            else:
-                setattr(self, k, v)
+    @url.setter
+    def url(self, value):
+        self._url = value
 
-    def _getMemberObjects(self):
-        """
-        Return the appropriate objects for each child of this object.
+    @property
+    def created_dt(self):
+        return dt.fromtimestamp(int(self.created)) if hasattr(self, 'created') else None
 
-        The default "members" attribute only contains the URLs for the
-        children of this object.  This returns a list of the actual objects.
-        """
-        memObjs = self._gal.getItemsForUrls(self._members, self)
-        return memObjs
+    @property
+    def updated_dt(self):
+        return dt.fromtimestamp(int(self.updated)) if hasattr(self, 'updated') else None
 
-    def _getTags(self):
-        """
-        Return the list of tag objects.
+    @property
+    def members(self):
+        return self.getMemberObjects()
 
-        returns(list[Tag])
-        """
-        # First, I want just the actual tag itself, not the RESTy "tag_item",
-        # so I'm going to modify the urls to save a step
-        ret = []
-        urls = []
-        for url in self.relationships['tags']['members']:
-            m = re.match('^(.*?/tag)_item(/\d+),\d+$', url)
-            urls.append('%s%s' % tuple(m.groups()))
-        if urls:
-            for url in urls:
-                resp = self._gal.getRespFromUrl(url)
-                ret.append(getItemFromResp(resp, self._gal, self))
-        return ret
-
-    def _getComments(self):
-        """
-        Return a list of the Comment items for this item.
-
-        returns(list[Comment])  : a list of Comment objects
-        """
-        ret = []
-        # I can't use the shortcut I did for tags so I need to get the list
-        # of comments in the first call and then create the objects with
-        # the calls thereafter
-        commListUrl = self.relationships['comments']['url']
-        resp = self._gal.getRespFromUrl(commListUrl)
-        tmpObj = json.loads(resp.read())
-        for url in tmpObj['members']:
-            resp = self._gal.getRespFromUrl(url)
-            ret.append(getItemFromResp(resp, self._gal, self))
-        return ret
-
-    def _getUrlObject(self, url):
-        """
-        Return the album cover image.
-        """
-        resp = self._gal.getRespFromUrl(url)
-        return getItemFromResp(resp, self._gal, self)
-
-    def getCrDT(self):
-        """
-        Return the time this item was created.
-        """
-        if hasattr(self, 'created'):
-            return datetime.fromtimestamp(int(self.created))
-        return None
-
-    def getUpdDT(self):
-        """
-        Return the time this item was last updated.
-        """
-        if hasattr(self, 'updated'):
-            return datetime.fromtimestamp(int(self.updated))
-        return None
+    @members.setter
+    def members(self, value):
+        self._members = value
 
     def delete(self):
-        """
-        Destroy this instance's items.
+        return self._gallery.delete(self.url)
 
-        returns(tuple(status, msg))    : a tuple of a boolean status
-                                         and a message if there is an error
-        """
-        return self._gal.deleteItem(self)
+    def refresh(self):
+        resp = self._gallery.get(self.url)
+        return parseItem(resp.json(), self._gallery, self._parent)
 
-    def update(self, title=None, description=None):
-        """
-        Update either the title, the description or both.
-
-        title(str)                      : The new item title
-        description(str)                : The new item description
-
-        returns(tuple(status, msg))    : a tuple of a boolean status
-                                         and a message if there is an error
-        """
-        if title is not None:
-            self.title = title
-        if description is not None:
-            self.description = description
-        return self._gal.updateItem(self)
-
-    def tag(self, tagName):
-        """
-        Tag this item.
-
-        tagName(str)        : The actual tag name
-
-        returns(Tag)        : The tag that was created
-        """
-        return self._gal.tagItem(self, tagName)
+    def getMemberObjects(self):
+        member_objs = self._gallery.getItemsForUrls(self._members, self)
+        return member_objs
 
 
 class Album(BaseRemote):
-    def addImage(self, image, title='', description='', name=''):
-        """
-        Add a LocalImage object to the album.
-
-        image(LocalImage)       : The image to upload
-
-        returns(RemoteImage)    : The RemoteImage object that was created
-        """
-        if not isinstance(image, LocalImage):
-            raise TypeError('%r is not of type LocalImage' % image)
-        return self._gal.addImage(self, image, title, description, name)
-
-    def addMovie(self, movie, name='', title='', description=''):
-        """
-        Add a LocalMovie object to the album.
-
-        movie(LocalMovie)       : The movie to upload
-
-        returns(RemoteMovie)    : The RemoteMovie object that was created
-        """
-        return self._gal.addMovie(self, movie, title, description, name)
-
-    def addAlbum(self, albumName, title, description=''):
-        """
-        Add a subalbum to this album.
-
-        albumName(str)  : The name of the new album
-        title(str)      : The album title
-        description(str): The album description
-
-        returns(Album)  : The Album object that was created
-        """
-        return self._gal.addAlbum(self, albumName, title, description)
-
-    def setCover(self, image):
-        """
-        Set the album cover to the RemoteImage.
-
-        image(RemoteImage)  : The image to set as the album cover
-
-        returns(tuple(status, msg))    : a tuple of a boolean status
-                                         and a message if there is an error
-        """
-        return self._gal.setAlbumCover(self, image)
-
-    def getAlbums(self):
-        """
-        Return a list of the sub-albums in this album.
-
-        returns(list[Album])  : A list of Album objects
-        """
-        return self._getByType('album')
-    Albums = property(getAlbums)
-
-    def getImages(self):
-        """
-        Return a list of the images in this album.
-
-        returns(list[RemoteImage])  : A list of RemoteImages
-        """
-        return self._getByType('photo')
-    Images = property(getImages)
-
-    def getMovies(self):
-        """
-        Return a list of the movies in this album.
-
-        returns(list[RemoteMovie])  : A list of RemoteMovie objects
-        """
-        return self._getByType('movie')
-    Movies = property(getMovies)
-
-    def getRandomImage(self, direct=True):
-        """
-        Return a random RemoteImage object for the album.
-
-        If "direct" is False, a random image can be pulled from nested albums.
-
-        direct(bool)        : If set to False, the image may be pulled from
-                              a sub-album
-
-        returns(RemoteImage)    : a RemoteImage instance
-        """
-        return self._gal.getRandomImage(self, direct)
 
     def _getByType(self, t):
         ret = []
@@ -302,12 +101,74 @@ class Album(BaseRemote):
                 ret.append(m)
         return ret
 
+    def addImage(self, image, title='', description='', name=''):
+        """
+        Add image.
+
+        @param image: LocalImage
+        """
+        print(f"addImage image: {type(image)}")  # DEBUG
+        entity = {
+            "name": name,
+            "type": image.type,
+            "title": title,
+            "description": description,
+        }
+        files = {
+            "entity": (None, json.dumps(entity), 'application/json'),
+            "file": (image.path, open(image.path, 'rb')),
+        }
+        # TODO use gallery (not gallery.client)
+        resp = self._gallery.client.request('POST', self.url, files=files)
+        url = resp.json()['url']
+        return parseItem(self._gallery.get(url).json(), self, self)
+
+    def getAlbums(self):
+        """
+        Get a list of the sub-albums in this album.
+
+        @return: A list of Album objects
+        """
+        return self._getByType('album')
+
+    Albums = property(getAlbums)
+
+    def getImages(self):
+        """
+        Get all the images in this album.
+
+        @return: A list of all images
+        """
+        return self._getByType('photo')
+
+    Images = property(getImages)
+
+    def getMovies(self):
+        """
+        Get all the movies in this album.
+
+        @return: A list of all movies
+        """
+        return self._getByType('movie')
+
+    Movies = property(getMovies)
+
+    def getRandomImage(self, direct=True):
+        """
+        Get a random RemoteImage for the album.
+
+        @param direct: If set to False, the image may be pulled from a sub-album
+        @return: a RemoteImage instance
+        """
+        return self._gallery.getRandomImage(self, direct)
+
 
 class Image(object):
     contentType = ''
 
 
 class LocalImage(Image):
+
     def __init__(self, path, replaceSpaces=True):
         if not os.path.isfile(path):
             raise IOError('%s is not a file' % path)
@@ -344,7 +205,7 @@ class LocalImage(Image):
         """
         Get the entire contents of the file.
 
-        returns(str)    : File contents
+        @return: File contents
         """
         if self.fh is None:
             self.fh = open(self.path, 'rb')
@@ -355,78 +216,72 @@ class LocalImage(Image):
         """
         Get the upload content.
 
-        returns  : a string containing the MIME headers and the actual
-                   binary content to be uploaded
+        @return: the MIME headers and the actual
+                  binary content to be uploaded
         """
-        ret = 'Content-Disposition: form-data; name="file"; '
-        ret += 'filename="%s"\r\n' % self.filename
-        ret += 'Content-Type: %s\r\n' % self.ContentType
-        ret += 'Content-Transfer-Encoding: binary\r\n'
+        ret = "Content-Disposition: form-data; name='file'; "
+        ret += "filename='%s'\r\n" % self.filename
+        ret += "Content-Type: %s\r\n" % self.ContentType
+        ret += "Content-Transfer-Encoding: binary\r\n"
         ret += '\r\n'
         ret += self.getFileContents()
         ret += '\r\n'
         return ret
 
     def close(self):
-        try:
-            self.fh.close()
-        except:
-            pass
+        self.fh.close()
 
 
 class RemoteImage(BaseRemote, Image):
+
     def addComment(self, comment):
         """
         Comment on this item with the string "comment".
 
-        comment(str)        : The comment
-
-        returns(Comment)        : The comment that was created
+        @param comment: The comment
+        @return: The comment that was created
         """
-        return self._gal.addComment(self, comment)
+        return self._gallery.addComment(self, comment)
 
     def read(self, length=None):
         if not self.fh:
-            resp = self._gal.getRespFromUrl(self.file_url)
+            resp = self._gallery.getRespFromUrl(self.file_url)
             self.fh = resp
         if length is None:
-            return self.fh.read()
-        return self.fh.read(int(length))
+            data = self.fh.read()
+        else:
+            data = self.fh.read(int(length))
+        return data
 
     def close(self):
-        try:
-            self.fh.close()
-        except:
-            pass
+        self.fh.close()
 
-    def getResizeHandle(self):
+    def get_resize_handle(self):
         """
-        Return an object handle to the "resize" version of the image.
+        Get an object handle to the "resize" version of the image.
 
-        returns(urllib2.addinfourl) : A file-like object handle,
-            (specifically a urllib2.addinfourl) for retrieving
-            resized image
+        @return: A file-like object handle to the resized image
         """
+        resp = None
         if hasattr(self, 'resize_url'):
-            resp = self._gal.getRespFromUrl(self.resize_url)
-            return resp
-        return None
+            resp = self._gallery.getRespFromUrl(self.resize_url)
+        return resp
 
-    def getThumbHandle(self):
+    def get_thumb_handle(self):
         """
-        Return an object handle to the "thumbnail" version of the image.
+        Get an object handle to the "thumbnail" version of the image.
 
-        returns(urllib2.addinfourl) : A file-like object handle,
-            (specifically a urllib2.addinfourl) for retrieving
-            thumbnail image
+        @return: A file-like object handle,
+                 (specifically a urllib2.addinfourl) to the thumbnail image
         """
+        resp = None
         if hasattr(self, 'thumb_url'):
-            resp = self._gal.getRespFromUrl(self.thumb_url)
-            return resp
-        return None
+            resp = self._gallery.getRespFromUrl(self.thumb_url)
+        return resp
 
 
 class LocalMovie(LocalImage):
+
     def __init__(self, path, replaceSpaces=True):
         LocalImage.__init__(self, path, replaceSpaces)
         self.type = 'movie'
@@ -437,7 +292,6 @@ class RemoteMovie(RemoteImage):
 
 
 class Tag(BaseRemote):
-    """A simple class to represent a tag."""
 
     def __str__(self):
         return self.name
@@ -448,11 +302,10 @@ class Tag(BaseRemote):
         self.type = 'tag'
 
     def tag(self, tagName):
-        raise G3Error('You cannot tag a tag')
+        raise G3Error('You cannot tag a Tag')
 
 
 class Comment(BaseRemote):
-    """A class to represent a comment."""
 
     def __str__(self):
         return self.text
@@ -465,65 +318,82 @@ class Comment(BaseRemote):
             self._parent = getattr(self, '_item')
 
     def tag(self, tagName):
-        raise G3Error('You cannot tag a comment')
+        raise G3Error('You cannot tag a Comment')
 
 
-def getItemFromResp(response, galObj, parent=None):
+def parseItem(data, gallery, parent=None):
+    entity = data.get("entity", {})
+    if "count" in entity:
+        return Tag(data, gallery, parent)
+    if "text" in entity:
+        return Comment(data, gallery, parent)
+    t = entity.get("type")
+    if not t:
+        raise G3InvalidRespError("Missing entity type")
+    if t == "album":
+        return Album(data, gallery, parent)
+    elif t == "photo":
+        return RemoteImage(data, gallery, parent)
+    elif t == "movie":
+        return RemoteMovie(data, gallery, parent)
+    raise G3UnknownTypeError(f"Unknown type: {t}")
+
+
+def getItemFromResp(response, gallery, parent=None):
     """
-    Return the appropriate item for the given response object.
+    Get the appropriate item for the given response object.
 
-    response(addinfourl|dict)   : The response object from the urllib2 request
-                                  or a dict that has already been converted
-                                  (usually when called from getItemsFromResp)
-    galObj(Gallery3)            : The gallery object this is associated with
-    parent(Album)               : The parent object for this item
+    @param response: The (addinfourl) response object from the urllib2 request,
+                     or a dict that has already been converted
+    @param gallery: The gallery object this is associated with
+    @param parent: The parent object for this item
 
-    returns(BaseRemote)         : an implemenation of BaseRemote
+    @return: a BaseRemote instance
     """
-    galObj = weakref.ref(galObj)
-    if parent is not None:
-        parent = weakref.ref(parent)
+    gallery = gallery
+    parent = parent
+
     if isinstance(response, dict):
-        respObj = response
+        resp = response
     else:
-        respObj = json.loads(response.read())
-    if 'count' in respObj['entity']:
-        # This is a tag.  It doesn't have the same items as regular objects
-        return Tag(respObj, galObj, parent)
-    if 'text' in respObj['entity']:
-        # This is a comment.  It also does not have the same items as
-        # regular objects
-        return Comment(respObj, galObj, parent)
+        resp = json.loads(response)
+
+    if 'count' in resp['entity']:
+        # This is a tag, it doesn't have the same items as regular objects
+        return Tag(resp, gallery, parent)
+    if 'text' in resp['entity']:
+        # This is a comment, it does not have the same items as regular objects
+        return Comment(resp, gallery, parent)
+
     try:
-        t = respObj['entity']['type']
-    except:
-        raise G3InvalidRespError('Response contains no "entity type": %r' % response)
+        t = resp['entity']['type']
+    except KeyError:
+        raise G3InvalidRespError(f"Response contains no 'entity type': {response}")
+
     if t == 'album':
-        return Album(respObj, galObj, parent)
+        return Album(resp, gallery, parent)
     elif t == 'photo':
-        return RemoteImage(respObj, galObj, parent)
+        return RemoteImage(resp, gallery, parent)
     elif t == 'movie':
-        return RemoteMovie(respObj, galObj, parent)
+        return RemoteMovie(resp, gallery, parent)
     else:
-        raise G3UnknownTypeError('Unknown entity type: %s' % t)
+        raise G3UnknownTypeError(f"Unknown entity type: '{t}'")
 
 
-def getItemsFromResp(response, galObj, parent=None):
+def getItemsFromResp(response, gallery, parent=None):
     """
-    Get the raw response with a list of items.
+    Get the corresponding items for the given list of items.
 
-    response(addinfourl|dict)   : The response object from the urllib2 request
-                                  or a dict that has already been converted
-                                  (usually when called from getItemsFromResp)
-    galObj(Gallery3)            : The gallery object this is associated with
-    parent(Album)               : The parent object for this item
-
-    returns(list[BaseRemote])   : a list of corresponding (BaseRemote) objects
+    @param response: The (addinfourl) response object,
+                     or a dict that has already been converted
+    @param gallery: The gallery object this is associated with
+    @param parent: The parent Album object for this item
+    @return: a list of (BaseRemote) objects
     """
     ret = []
-    lResp = json.loads(response.read())
+    lResp = json.loads(response.text)
     if not isinstance(lResp, list):
-        lResp = list(lResp)
+        lResp = list(response)
     for resp in lResp:
-        ret.append(getItemFromResp(resp, galObj, parent))
+        ret.append(getItemFromResp(resp, gallery, parent))
     return ret
