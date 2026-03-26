@@ -244,40 +244,33 @@ class RemoteImage(BaseRemote, Image):
         return self._gallery.addComment(self, comment)
 
     def read(self, length=None):
-        if not self.fh:
-            resp = self._gallery.getRespFromUrl(self.file_url)
-            self.fh = resp
-        if length is None:
-            data = self.fh.read()
-        else:
-            data = self.fh.read(int(length))
+        resp = self._gallery.getRespFromUrl(self.file_url)
+        data = resp.content
         return data
 
-    def close(self):
-        self.fh.close()
-
-    def get_resize_handle(self):
+    def getResized(self):
         """
-        Get an object handle to the "resize" version of the image.
+        Get the "resized" version of the image.
 
-        @return: A file-like object handle to the resized image
+        @return: the resized image
         """
-        resp = None
+        img = None
         if hasattr(self, 'resize_url'):
             resp = self._gallery.getRespFromUrl(self.resize_url)
-        return resp
+            img = resp.content
+        return img
 
-    def get_thumb_handle(self):
+    def getThumbnail(self):
         """
-        Get an object handle to the "thumbnail" version of the image.
+        Get the "thumbnail" version of the image.
 
-        @return: A file-like object handle,
-                 (specifically a urllib2.addinfourl) to the thumbnail image
+        @return: the thumbnail image
         """
-        resp = None
+        img = None
         if hasattr(self, 'thumb_url'):
             resp = self._gallery.getRespFromUrl(self.thumb_url)
-        return resp
+            img = resp.content
+        return img
 
 
 class LocalMovie(LocalImage):
