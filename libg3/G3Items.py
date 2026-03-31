@@ -41,9 +41,9 @@ class BaseRemote:
     def __init__(self, data, gallery, parent=None):
         """Initialize.
 
-        @param data: dict
-        @param gallery: Gallery3 object
-        @param parent: the parent object
+        @param data dict
+        @param gallery Gallery3 object
+        @param parent the parent object
         """
         self._data = data
         self._entity = data.get('entity', {})
@@ -105,7 +105,7 @@ class Album(BaseRemote):
         """
         Add image.
 
-        @param image: LocalImage
+        @param image LocalImage
         """
         print(f"addImage image: {type(image)}")  # DEBUG
         entity = {
@@ -127,7 +127,7 @@ class Album(BaseRemote):
         """
         Get a list of the sub-albums in this album.
 
-        @return: A list of Album objects
+        @returns A list of Album objects
         """
         return self._getByType('album')
 
@@ -137,7 +137,7 @@ class Album(BaseRemote):
         """
         Get all the images in this album.
 
-        @return: A list of all images
+        @returns A list of all images
         """
         return self._getByType('photo')
 
@@ -147,7 +147,7 @@ class Album(BaseRemote):
         """
         Get all the movies in this album.
 
-        @return: A list of all movies
+        @returns A list of all movies
         """
         return self._getByType('movie')
 
@@ -157,8 +157,8 @@ class Album(BaseRemote):
         """
         Get a random RemoteImage for the album.
 
-        @param direct: If set to False, the image may be pulled from a sub-album
-        @return: a RemoteImage instance
+        @param direct If set to False, the image may be pulled from a sub-album
+        @returns a RemoteImage instance
         """
         return self._gallery.getRandomImage(self, direct)
 
@@ -205,7 +205,7 @@ class LocalImage(Image):
         """
         Get the entire contents of the file.
 
-        @return: File contents
+        @return File contents
         """
         if self.fh is None:
             self.fh = open(self.path, 'rb')
@@ -216,8 +216,8 @@ class LocalImage(Image):
         """
         Get the upload content.
 
-        @return: the MIME headers and the actual
-                  binary content to be uploaded
+        @return the MIME headers and the actual
+                binary content to be uploaded
         """
         ret = "Content-Disposition: form-data; name='file'; "
         ret += "filename='%s'\r\n" % self.filename
@@ -236,12 +236,33 @@ class RemoteImage(BaseRemote, Image):
 
     def addComment(self, comment):
         """
-        Comment on this item with the string "comment".
+        Comment on this item.
 
-        @param comment: The comment
-        @return: The comment that was created
+        @param comment The comment
+        @return The comment that was created
         """
-        return self._gallery.addComment(self, comment)
+        data = {
+            'item': self.url,
+            'text': comment,
+        }
+        url = self._gallery._url('comments')
+        print(f"URL: {url}")
+        print(f"DATA: {data}")
+        resp = self._gallery.post(url, data=data)
+        #resp = self._gallery.client.request('POST', self.url, files=files)
+
+        ##print(f"URL: {self.url}")
+        ##resp = self._gallery.post(self.url, data=data)
+
+        #resp = self._gallery.post('comments', data=data)
+        #url = resp.json()['url']
+        #return parseItem(self._gallery.get(url).json(), self, self)
+
+        ##img = getItemFromResp(resp, self._gallery)
+        img = getItemFromResp(resp, self._gallery, self.parent)
+        if hasattr(img, 'comments'):
+            img.comments.append(comm)
+        return comm
 
     def read(self, length=None):
         resp = self._gallery.getRespFromUrl(self.file_url)
@@ -252,7 +273,7 @@ class RemoteImage(BaseRemote, Image):
         """
         Get the "resized" version of the image.
 
-        @return: the resized image
+        @return the resized image
         """
         img = None
         if hasattr(self, 'resize_url'):
@@ -264,7 +285,7 @@ class RemoteImage(BaseRemote, Image):
         """
         Get the "thumbnail" version of the image.
 
-        @return: the thumbnail image
+        @return the thumbnail image
         """
         img = None
         if hasattr(self, 'thumb_url'):
@@ -336,12 +357,12 @@ def getItemFromResp(response, gallery, parent=None):
     """
     Get the appropriate item for the given response object.
 
-    @param response: The (addinfourl) response object from the urllib2 request,
-                     or a dict that has already been converted
-    @param gallery: The gallery object this is associated with
-    @param parent: The parent object for this item
+    @param response The (addinfourl) response object from the urllib2 request,
+                    or a dict that has already been converted
+    @param gallery The gallery object this is associated with
+    @param parent The parent object for this item
 
-    @return: a BaseRemote instance
+    @returns a BaseRemote instance
     """
     gallery = gallery
     parent = parent
@@ -349,7 +370,7 @@ def getItemFromResp(response, gallery, parent=None):
     if isinstance(response, dict):
         resp = response
     else:
-        resp = json.loads(response)
+        resp = json.loads(response.text)
 
     if 'count' in resp['entity']:
         # This is a tag, it doesn't have the same items as regular objects
@@ -377,11 +398,11 @@ def getItemsFromResp(response, gallery, parent=None):
     """
     Get the corresponding items for the given list of items.
 
-    @param response: The (addinfourl) response object,
-                     or a dict that has already been converted
-    @param gallery: The gallery object this is associated with
-    @param parent: The parent Album object for this item
-    @return: a list of (BaseRemote) objects
+    @param response The (addinfourl) response object,
+                    or a dict that has already been converted
+    @param gallery The gallery object this is associated with
+    @param parent The parent Album object for this item
+    @returns a list of (BaseRemote) objects
     """
     ret = []
     lResp = json.loads(response.text)

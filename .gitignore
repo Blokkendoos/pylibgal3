@@ -1,4 +1,8 @@
+build/
+dist/
 *.pyc
 test.py
 MANIFEST
-dist
+
+# Doxygen
+doc/

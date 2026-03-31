@@ -44,9 +44,9 @@ class Gallery3(object):
         """
         Initialize the Gallery 3 object.
 
-        @param host: The hostname of the gallery site
-        @param apiKey: The api key to use for the connections
-        @param g3Base: The remote url path to your gallery 3 install
+        @param host The hostname of the gallery site
+        @param apiKey The api key to use for the connections
+        @param g3Base The remote url path to your gallery 3 install
         """
         protocol = 'https'
         self.base_url = f"{protocol}://{host}:{port}/{g3Base.strip('/')}"
@@ -81,9 +81,9 @@ class Gallery3(object):
         """
         Get a random image for the album.
 
-        @param album: The album object to pull the random image from
-        @param direct: If set to False, the image may be pulled from a sub-album
-        @return: a RemoteImage instance
+        @param album The album object to pull the random image from
+        @param direct If set to False, the image may be pulled from a sub-album
+        @return a RemoteImage instance
         """
         scope = ('all', 'direct')[direct]
         data = {
@@ -91,7 +91,8 @@ class Gallery3(object):
             'random': 'true',
             'scope': scope,
         }
-        url = '%s?%s' % (album.url, urlencode(data))
+        url = f"{album.url}?{urlencode(data)}"
+        print(f"URL: {url}")
         resp = self.getRespFromUrl(url)
         return getItemFromResp(resp, self)
 
@@ -99,8 +100,8 @@ class Gallery3(object):
         """
         Get the response object given a full URL.
 
-        @param url: the url to the resource (on the server)
-        @return: object identified by the url
+        @param url the url to the resource (on the server)
+        @return object identified by the url
         """
         return self.get(url)
 
@@ -108,8 +109,8 @@ class Gallery3(object):
         """
         Get the response object with the given URI.
 
-        @param uri: The uri string defining the resource on the defined host
-        @return: The 'addinfourl' response object
+        @param uri The uri string defining the resource on the defined host
+        @return The 'addinfourl' response object
         """
         url = self._url(uri, kwargs)
         return self.getRespFromUrl(url)
@@ -118,8 +119,8 @@ class Gallery3(object):
         """
         Get an item for each specified URL.
 
-        @param urls: list of urls to retrieve
-        @return: a list of the corresponding remote objects
+        @param urls list of urls to retrieve
+        @return a list of the corresponding remote objects
         """
         numUrls = len(urls)
         start = 0
@@ -189,13 +190,13 @@ def login(host, username, passwd, g3Base='/gallery3', port=443):
     """
     Log you in.
 
-    @param host: The hostname of the gallery site
-    @param username: The username to login with
-    @param passwd: The password to login with
-    @param g3Base: The remote url path to your gallery 3 install
-    @param port: The port number to connect to
+    @param host The hostname of the gallery site
+    @param username The username to login with
+    @param passwd The password to login with
+    @param g3Base The remote url path to your gallery 3 install
+    @param port The port number to connect to
 
-    @return: a Gallery3 object on success, otherwise None
+    @return a Gallery3 object on success, otherwise None
     """
     data = {
         'user': username,
